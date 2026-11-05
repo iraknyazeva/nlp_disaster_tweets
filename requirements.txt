@@ -1,0 +1,17 @@
+pandas
+numpy
+scikit-learn
+catboost
+gensim
+sentence-transformers
+transformers
+datasets
+evaluate
+accelerate
+torch
+nltk
+pyyaml
+click
+joblib
+matplotlib
+seaborn
