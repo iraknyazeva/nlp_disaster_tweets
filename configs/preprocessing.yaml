@@ -1,0 +1,14 @@
+versions:
+  v1: "basic"         # базовая очистка - спец. символы, приведение к нижнему регистру
+  v2: "stopwords"     # v1 + удаление стоп-слов
+  v3: "lemmatization" # v2 + лемматизация
+
+default_version: "v1"
+
+# nltk ресурсы
+nltk_packages:
+  - stopwords
+  - wordnet
+  - omw-1.4
+  - punkt
+  - punkt_tab
