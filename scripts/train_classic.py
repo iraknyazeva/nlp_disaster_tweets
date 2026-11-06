@@ -7,9 +7,8 @@ import click
 import yaml
 import pandas as pd
 import numpy as np
-import os
+import optuna
 import joblib
-import matplotlib.pyplot as plt
 from sklearn.feature_extraction.text import TfidfVectorizer
 from gensim.models import Word2Vec
 from sklearn.linear_model import LogisticRegression
@@ -20,6 +19,52 @@ from sklearn.metrics import f1_score, accuracy_score
 
 from src.utils.seed import set_seed
 from src.preprocessing.clean import apply_preprocessing
+
+def get_w2v_texts(texts, w2v):
+    embeddings = []
+    for text in texts:
+        tokens = text.split()
+        vectors = [w2v.wv[token] for token in tokens if token in w2v.wv]
+        if len(vectors) > 0:
+            embeddings.append(np.mean(vectors, axis=0))
+        else:
+            embeddings.append(np.zeros(w2v.vector_size))
+    return np.array(embeddings)
+
+def train_catboost_with_optuna(X_train, y_train, X_val, y_val, cfg, n_trials=20):
+    def objective(trial):
+        params = {
+            "iterations": trial.suggest_int("iterations", 300, 800),
+            "learning_rate": trial.suggest_float("learning_rate", 0.01, 0.3, log=True),
+            "depth": trial.suggest_int("depth", 4, 8),
+            "l2_leaf_reg": trial.suggest_float("l2_leaf_reg", 1e-3, 10.0, log=True),
+            "random_seed": cfg["seed"],
+            "verbose": 0,
+            "early_stopping_rounds": 50,
+        }
+        model = CatBoostClassifier(**params)
+        model.fit(X_train, y_train, eval_set=(X_val, y_val))
+        preds = model.predict(X_val)
+        return f1_score(y_val, preds)
+
+    study = optuna.create_study(
+        direction="maximize",
+        sampler=optuna.samplers.TPESampler(seed=cfg["seed"])
+    )
+    study.optimize(objective, n_trials=n_trials)
+
+    print(f"Best params: {study.best_params}")
+    print(f"Best F1 during search: {study.best_value:.4f}")
+
+    best_params = study.best_params.copy()
+    best_params.update({
+        "random_seed": cfg["seed"],
+        "verbose": 100,
+        "early_stopping_rounds": 50,
+    })
+    best_model = CatBoostClassifier(**best_params)
+    best_model.fit(X_train, y_train, eval_set=(X_val, y_val))
+    return best_model
 
 @click.command()
 @click.option("--config", default="configs/classic_ml.yaml", help="Path to config")
@@ -76,6 +121,7 @@ def main(config, mode, preprocess, model):
             best_model = grid.best_estimator_
             print(f"Best params: {grid.best_params_}")
             print(f"CV F1: {grid.best_score_:.4f}")
+            preds = best_model.predict(X_val)
 
         elif model == "catboost":
             vectorizer = TfidfVectorizer(
@@ -86,27 +132,64 @@ def main(config, mode, preprocess, model):
             X_train_vec = vectorizer.fit_transform(X_train)
             X_val_vec = vectorizer.transform(X_val)
 
-            cb = CatBoostClassifier(
-                iterations=cfg["catboost"]["iterations"],
-                learning_rate=cfg["catboost"]["learning_rate"],
-                depth=cfg["catboost"]["depth"],
-                verbose=cfg["catboost"]["verbose"],
-                early_stopping_rounds=cfg["catboost"]["early_stopping_rounds"],
-                random_seed=cfg["seed"]
+            best_model = train_catboost_with_optuna(
+                X_train_vec, y_train, X_val_vec, y_val, cfg
             )
-            cb.fit(X_train_vec, y_train, eval_set=(X_val_vec, y_val))
-            best_model = cb
+            preds = best_model.predict(X_val_vec)
             joblib.dump(vectorizer, f"models/{model_name}_vectorizer.pkl")
 
-        preds = best_model.predict(X_val_vec if model == "catboost" else X_val)
         f1 = f1_score(y_val, preds)
         accuracy = accuracy_score(y_val, preds)
-        print(f"Val f1: {f1:.4f}")
-        print(f"Val accuracy: {f1:.4f}")
+        print(f"Val F1: {f1:.4f}")
+        print(f"Val Accuracy: {accuracy:.4f}")
         joblib.dump(best_model, f"models/{model_name}.pkl")
 
-    else:
-        click.echo("-")
+    elif mode == "word2vec":
+        tokenized = [text.split() for text in X_train]
+        w2v = Word2Vec(
+            sentences=tokenized,
+            vector_size=300,
+            window=3,
+            negative=10,
+            min_count=2,
+            seed=cfg["seed"]
+        )
+
+        X_train_emb = get_w2v_texts(X_train, w2v)
+        X_val_emb = get_w2v_texts(X_val, w2v)
+
+        if model == "logreg":
+            logreg = LogisticRegression(
+                class_weight=cfg["logreg"]["class_weight"],
+                max_iter=cfg["logreg"]["max_iter"],
+                random_state=cfg["seed"]
+            )
+            param_grid = cfg["logreg"]["param_grid"]
+            grid = GridSearchCV(
+                logreg, param_grid,
+                cv=cfg["cv_folds"],
+                scoring=cfg["scoring"],
+                n_jobs=-1,
+                verbose=1
+            )
+            grid.fit(X_train_emb, y_train)
+            best_model = grid.best_estimator_
+            print(f"Best params: {grid.best_params_}")
+            print(f"CV F1: {grid.best_score_:.4f}")
+            preds = best_model.predict(X_val_emb)
+
+        elif model == "catboost":
+            best_model = train_catboost_with_optuna(
+                X_train_emb, y_train, X_val_emb, y_val, cfg
+            )
+            preds = best_model.predict(X_val_emb)
+
+        f1 = f1_score(y_val, preds)
+        accuracy = accuracy_score(y_val, preds)
+        print(f"Val F1: {f1:.4f}")
+        print(f"Val Accuracy: {accuracy:.4f}")
+        joblib.dump(best_model, f"models/{model_name}.pkl")
+        joblib.dump(w2v, f"models/{model_name}_w2v.pkl")
 
 if __name__ == "__main__":
     main()

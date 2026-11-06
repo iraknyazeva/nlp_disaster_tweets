@@ -227,3 +227,6 @@ models/
 *.bin
 *.pt
 *.safetensors
+
+# Catoost
+catboost_info/
