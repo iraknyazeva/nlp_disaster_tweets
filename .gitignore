@@ -221,6 +221,7 @@ __marimo__/
 
 # Data, models
 data/
+!data/raw/.gitkeep
 models/
 *.csv
 *.pkl
@@ -230,3 +231,5 @@ models/
 
 # Catoost
 catboost_info/
+
+*.csv
