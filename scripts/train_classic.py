@@ -42,6 +42,8 @@ def train_catboost_with_optuna(X_train, y_train, cfg):
             "random_seed": cfg["seed"],
             "verbose": 0,
             "early_stopping_rounds": early_stopping,
+            "task_type": "GPU",
+            "devices": 0,
         }
 
         for name, space in search_space.items():
@@ -60,7 +62,7 @@ def train_catboost_with_optuna(X_train, y_train, cfg):
             model, X_train, y_train,
             cv=cv_folds,
             scoring="f1",
-            n_jobs=-1
+            n_jobs=1
         )
         return scores.mean()
 
@@ -78,6 +80,8 @@ def train_catboost_with_optuna(X_train, y_train, cfg):
         "random_seed": cfg["seed"],
         "verbose": 100,
         "early_stopping_rounds": early_stopping,
+        "task_type": "GPU",
+        "devices": 0,
     })
     best_model = CatBoostClassifier(**best_params)
     best_model.fit(X_train, y_train)
