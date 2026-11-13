@@ -17,7 +17,7 @@ from src.utils.seed import set_seed
 from src.features.embeddings import get_embeddings
 from src.preprocessing.clean import apply_preprocessing
 
-@click.command
+@click.command()
 @click.option("--config", default="configs/embeddings.yaml")
 @click.option("--use-preprocessed", is_flag=True, help="использовать ли предобработанный текст")
 def main(config, use_preprocessed):

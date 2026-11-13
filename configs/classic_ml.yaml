@@ -14,7 +14,7 @@ logreg:
     solver: ["liblinear", "saga"]
 
 catboost:
-  n_trials: 20
+  n_trials: 12
   early_stopping_rounds: 50
   search_space:
     iterations:

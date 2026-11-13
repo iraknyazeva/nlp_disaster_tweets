@@ -99,7 +99,8 @@ def main():
     trainer.train()
 
     metrics = trainer.evaluate()
-    print(metrics)
+    print(f"Val F1: {metrics['eval_f1']:.4f}")
+    print(f"Val Accuracy: {metrics['eval_accuracy']:.4f}")
 
     trainer.save_model(cfg["output_dir"])
     tokenizer.save_pretrained(cfg["output_dir"])
