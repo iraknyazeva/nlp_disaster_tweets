@@ -7,11 +7,11 @@ tfidf:
 
 logreg:
   class_weight: "balanced"
-  max_iter: 1000
+  max_iter: 2000
   param_grid:
-    C: [0.01, 0.1, 1, 10, 100]
+    C: [0.01, 0.1, 1, 10]
     penalty: ["l1", "l2"]
-    solver: ["liblinear", "saga"]
+    solver: ["liblinear"]
 
 catboost:
   n_trials: 12

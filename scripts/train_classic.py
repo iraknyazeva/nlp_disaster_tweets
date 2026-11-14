@@ -16,6 +16,7 @@ from catboost import CatBoostClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
 from sklearn.metrics import f1_score, accuracy_score
+from sklearn.preprocessing import StandardScaler
 
 from src.utils.seed import set_seed
 from src.preprocessing.clean import apply_preprocessing
@@ -135,7 +136,7 @@ def main(config, mode, preprocess, model):
                 cv=cfg["cv_folds"],
                 scoring=cfg["scoring"],
                 n_jobs=-1,
-                verbose=1
+                verbose=2
             )
             grid.fit(X_train, y_train)
             best_model = grid.best_estimator_
@@ -177,6 +178,10 @@ def main(config, mode, preprocess, model):
         X_val_emb = get_w2v_texts(X_val, w2v)
 
         if model == "logreg":
+            scaler = StandardScaler()
+            X_train_emb = scaler.fit_transform(X_train_emb)
+            X_val_emb = scaler.transform(X_val_emb)
+
             logreg = LogisticRegression(
                 class_weight=cfg["logreg"]["class_weight"],
                 max_iter=cfg["logreg"]["max_iter"],
@@ -187,14 +192,15 @@ def main(config, mode, preprocess, model):
                 logreg, param_grid,
                 cv=cfg["cv_folds"],
                 scoring=cfg["scoring"],
-                n_jobs=-1,
-                verbose=1
+                n_jobs=1,
+                verbose=2
             )
             grid.fit(X_train_emb, y_train)
             best_model = grid.best_estimator_
             print(f"Best params: {grid.best_params_}")
             print(f"CV F1: {grid.best_score_:.4f}")
             preds = best_model.predict(X_val_emb)
+            joblib.dump(scaler, f"models/{model_name}_scaler.pkl")
 
         elif model == "catboost":
             best_model = train_catboost_with_optuna(X_train_emb, y_train, cfg)
