@@ -57,12 +57,18 @@ pip install -r requirements.txt
 
 | Подход | Модель | Препроцессинг | Val F1 | Val Accuracy |
 
+
 | tf-idf | logreg |      v1       | 0.7565 |    0.7912    |
+
 | tf-idf | logreg |      v2       | 0.7629 |    0.7971    |
+
 | tf-idf | logreg |      v3       | 0.7701 |    0.8043    |
 
+
 | tf-idf | catboost |    v1       | 0.7282 |    0.7853    |
+
 | tf-idf | catboost |    v2       | 0.7457 |    0.7886    |
+
 | tf-idf | catboost |    v3       | 0.7506 |    0.7971    |
 
 - с увеличением препроцессинга качество улучшается
@@ -73,12 +79,18 @@ pip install -r requirements.txt
 
 | Подход | Модель | Препроцессинг | Val F1 | Val Accuracy |
 
+
 |   w2v  | logreg |      v1       | 0.6986 |    0.7216    |
+
 |   w2v  | logreg |      v2       | 0.6805 |    0.7078    |
+
 |   w2v  | logreg |      v3       | 0.7102 |    0.7380    |
 
+
 |   w2v  | catboost |    v1       | 0.6758 |    0.7360    |
+
 |   w2v  | catboost |    v2       | 0.5717 |    0.6546    |
+
 |   w2v  | catboost |    v3       | 0.6114 |    0.6829    |
 
 w2v брала из gensim и обучала на train части датасета(предварительно отделив val часть)
@@ -94,7 +106,9 @@ w2v брала из gensim и обучала на train части датасе�
 
 | Подход | Модель | Препроцессинг | Val F1 | Val Accuracy |
 
+
 | miniLM | logreg |       -       | 0.7964 |    0.8221    |
+
 | miniLM | logreg |       v1      | 0.7814 |    0.8089    |
 
 [huggingface.co/sentence-transformers/all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2) модельку отсюда брала. при выборе смотрела на колво параметров и качество с лидерборда.
@@ -105,6 +119,7 @@ w2v брала из gensim и обучала на train части датасе�
 ## distilbert 
 
 |   Модель    | Препроцессинг | Val F1 | Val Accuracy |
+
 
 | DistilBERT  |        -      | 0.8203 |    0.8444    |
 
