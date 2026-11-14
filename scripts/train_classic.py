@@ -9,6 +9,7 @@ import pandas as pd
 import numpy as np
 import optuna
 import joblib
+import torch
 from sklearn.feature_extraction.text import TfidfVectorizer
 from gensim.models import Word2Vec
 from sklearn.linear_model import LogisticRegression
@@ -38,13 +39,14 @@ def train_catboost_with_optuna(X_train, y_train, cfg):
     early_stopping = cfg["catboost"].get("early_stopping_rounds", 50)
     cv_folds = cfg.get("cv_folds", 5)
 
-    def objective(trial):
+    def objective(trial):    
         params = {
             "random_seed": cfg["seed"],
             "verbose": 0,
             "early_stopping_rounds": early_stopping,
-            "task_type": "GPU",
         }
+        if torch.cuda.is_available():
+            params["task_type"] = "GPU"
 
         for name, space in search_space.items():
             if space["type"] == "int":
@@ -80,8 +82,11 @@ def train_catboost_with_optuna(X_train, y_train, cfg):
         "random_seed": cfg["seed"],
         "verbose": 100,
         "early_stopping_rounds": early_stopping,
-        "task_type": "GPU",
     })
+
+    if torch.cuda.is_available():
+        best_params["task_type"] = "GPU"
+
     best_model = CatBoostClassifier(**best_params)
     best_model.fit(X_train, y_train)
 
