@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+# добавляем корень проекта в sys.path для импортов из src 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import click
@@ -22,6 +23,7 @@ from sklearn.preprocessing import StandardScaler
 from src.utils.seed import set_seed
 from src.preprocessing.clean import apply_preprocessing
 
+# получаем эмбеддинги твитов усреднением эмбеддингов токенов, полученных word2vec
 def get_w2v_texts(texts, w2v):
     embeddings = []
     for text in texts:
@@ -33,6 +35,7 @@ def get_w2v_texts(texts, w2v):
             embeddings.append(np.zeros(w2v.vector_size))
     return np.array(embeddings)
 
+# подбор гиперпараметров catboost с помощью optuna 
 def train_catboost_with_optuna(X_train, y_train, cfg):
     search_space = cfg["catboost"]["search_space"]
     n_trials = cfg["catboost"].get("n_trials", 20)
@@ -45,6 +48,7 @@ def train_catboost_with_optuna(X_train, y_train, cfg):
             "verbose": 0,
             "early_stopping_rounds": early_stopping,
         }
+        # если gpu доступно, обучаем на gpu 
         if torch.cuda.is_available():
             params["task_type"] = "GPU"
 
@@ -77,6 +81,7 @@ def train_catboost_with_optuna(X_train, y_train, cfg):
     print(f"Best params: {study.best_params}")
     print(f"CV F1: {study.best_value:.4f}")
 
+    # обучаем финальную модель с лучшими параметрами 
     best_params = study.best_params.copy()
     best_params.update({
         "random_seed": cfg["seed"],
@@ -90,6 +95,7 @@ def train_catboost_with_optuna(X_train, y_train, cfg):
     best_model = CatBoostClassifier(**best_params)
     best_model.fit(X_train, y_train)
 
+    # возвращает обученную модель 
     return best_model
 
 @click.command()
@@ -98,6 +104,7 @@ def train_catboost_with_optuna(X_train, y_train, cfg):
 @click.option("--preprocess", type=click.Choice(["v1", "v2", "v3"]), default="v1")
 @click.option("--model", type=click.Choice(["logreg", "catboost"]), default="logreg")
 def main(config, mode, preprocess, model):
+    # загрузка конфигов
     with open(config) as f:
         cfg = yaml.safe_load(f)
 
@@ -106,10 +113,12 @@ def main(config, mode, preprocess, model):
 
     set_seed(cfg["seed"])
 
+    # загружаем данные и применяем выбранный препроцесссинг 
     train = pd.read_csv(data_cfg["train_path"])
     texts = apply_preprocessing(train[data_cfg["text_column"]], preprocess)
     y = train[data_cfg["target_column"]]
 
+    # разделение выборки на train/val
     X_train, X_val, y_train, y_val = train_test_split(
         texts, y,
         test_size=data_cfg["test_size"],
@@ -122,6 +131,7 @@ def main(config, mode, preprocess, model):
 
     if mode == "tfidf":
         if model == "logreg":
+            # tfidf + logreg 
             pipe = Pipeline([
                 ("tfidf", TfidfVectorizer(
                     ngram_range=tuple(cfg["tfidf"]["ngram_range"]),
@@ -150,6 +160,7 @@ def main(config, mode, preprocess, model):
             preds = best_model.predict(X_val)
 
         elif model == "catboost":
+            # tfidf + catboost
             vectorizer = TfidfVectorizer(
                 ngram_range=tuple(cfg["tfidf"]["ngram_range"]),
                 max_features=cfg["tfidf"]["max_features"],
@@ -162,6 +173,7 @@ def main(config, mode, preprocess, model):
             preds = best_model.predict(X_val_vec)
             joblib.dump(vectorizer, f"models/{model_name}_vectorizer.pkl")
 
+        # считаем метрики и сохраняем модель
         f1 = f1_score(y_val, preds)
         accuracy = accuracy_score(y_val, preds)
         print(f"Val F1: {f1:.4f}")
@@ -169,6 +181,7 @@ def main(config, mode, preprocess, model):
         joblib.dump(best_model, f"models/{model_name}.pkl")
 
     elif mode == "word2vec":
+        # обучаем word2vec
         tokenized = [text.split() for text in X_train]
         w2v = Word2Vec(
             sentences=tokenized,
@@ -179,10 +192,13 @@ def main(config, mode, preprocess, model):
             seed=cfg["seed"]
         )
 
+        # получаем эмбеддинги твитов
         X_train_emb = get_w2v_texts(X_train, w2v)
         X_val_emb = get_w2v_texts(X_val, w2v)
 
         if model == "logreg":
+            # word2vec + logreg
+            # для logreg делаем стандартизацию эмбеддингов word2vec 
             scaler = StandardScaler()
             X_train_emb = scaler.fit_transform(X_train_emb)
             X_val_emb = scaler.transform(X_val_emb)
@@ -208,9 +224,11 @@ def main(config, mode, preprocess, model):
             joblib.dump(scaler, f"models/{model_name}_scaler.pkl")
 
         elif model == "catboost":
+            # word2vec + catboost 
             best_model = train_catboost_with_optuna(X_train_emb, y_train, cfg)
             preds = best_model.predict(X_val_emb)
 
+        # считаем метрикии сохраняем модель 
         f1 = f1_score(y_val, preds)
         accuracy = accuracy_score(y_val, preds)
         print(f"Val F1: {f1:.4f}")

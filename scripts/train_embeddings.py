@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+# добавляем корень проекта в sys.path для импортов из src 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import numpy as np
@@ -21,6 +22,7 @@ from src.preprocessing.clean import apply_preprocessing
 @click.option("--config", default="configs/embeddings.yaml")
 @click.option("--use-preprocessed", is_flag=True, help="использовать ли предобработанный текст")
 def main(config, use_preprocessed):
+    # загружаем конфиги 
     with open(config) as f:
         cfg = yaml.safe_load(f)
 
@@ -29,9 +31,11 @@ def main(config, use_preprocessed):
 
     set_seed(cfg["seed"])
 
+    # загружаем данные 
     train = pd.read_csv(data_cfg["train_path"])
     texts = train[data_cfg["text_column"]].tolist()
 
+    # применяем препроцессинг, если нужно 
     if use_preprocessed:
         texts = apply_preprocessing(texts, "v1")
         vers = "prep_v1"
@@ -41,6 +45,7 @@ def main(config, use_preprocessed):
 
     y = train[data_cfg["target_column"]]
 
+    # получаем эмбеддинги от miniLM
     embeddings = get_embeddings(
         texts,
         model_name=cfg["model_name"],
@@ -48,6 +53,7 @@ def main(config, use_preprocessed):
         show_progress_bar=cfg["show_progress_bar"]
     )
 
+    # разделяем на train/val 
     X_train, X_val, y_train, y_val = train_test_split(
         embeddings, y,
         test_size=data_cfg["test_size"],
@@ -61,6 +67,7 @@ def main(config, use_preprocessed):
         random_state=cfg["seed"]
     )
 
+    # подбор гиперпараметров и обучение logreg 
     grid = GridSearchCV(
         logreg,
         cfg["logreg"]["param_grid"],
@@ -74,6 +81,7 @@ def main(config, use_preprocessed):
     best_model = grid.best_estimator_
     preds = best_model.predict(X_val)
 
+    # считаем метрики
     f1 = f1_score(y_val, preds)
     acc = accuracy_score(y_val, preds)
 
@@ -82,6 +90,7 @@ def main(config, use_preprocessed):
     print(f"Val f1: {f1:.4f}")
     print(f"Val accuracy: {acc:.4f}")
 
+    # сохраняем модель 
     Path("models").mkdir(exist_ok=True)
     model_path = f"models/minilm_logreg_{vers}.pkl"
     joblib.dump(best_model, model_path)

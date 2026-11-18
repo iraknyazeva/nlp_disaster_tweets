@@ -16,6 +16,7 @@ from src.utils.seed import set_seed
 from src.preprocessing.clean import apply_preprocessing
 from src.features.embeddings import get_embeddings
 
+# загружаем валидационную выборку
 def load_val_data(data_cfg):
     train = pd.read_csv(data_cfg["train_path"])
     texts = train[data_cfg["text_column"]].tolist()

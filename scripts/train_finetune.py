@@ -1,6 +1,7 @@
 import sys
 from pathlib import Path
 
+# добавляем корень проекта в sys.path для импортов из src 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import yaml
@@ -20,6 +21,7 @@ from sklearn.metrics import f1_score, accuracy_score
 
 from src.utils.seed import set_seed
 
+# функция для подсчета метрик
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
     preds = np.argmax(logits, axis=-1)
@@ -29,6 +31,7 @@ def compute_metrics(eval_pred):
     }
 
 def main():
+    # загружаем конфиги 
     with open("configs/finetune.yaml") as f:
         cfg = yaml.safe_load(f)
 
@@ -37,10 +40,12 @@ def main():
 
     set_seed(cfg["seed"])
 
+    # загружаем данные
     train_df = pd.read_csv(data_cfg["train_path"])
     texts = train_df[data_cfg["text_column"]].tolist()
     labels = train_df[data_cfg["target_column"]].tolist()
 
+    # разделяем на train/val 
     X_train, X_val, y_train, y_val = train_test_split(
         texts, labels,
         test_size=data_cfg["test_size"],
@@ -48,9 +53,11 @@ def main():
         stratify=labels
     )
 
+    # создаем hugging face датасеты 
     train_ds = Dataset.from_dict({"text": X_train, "label": y_train})
     val_ds = Dataset.from_dict({"text": X_val, "label": y_val})
 
+    # загружаем токенизатор 
     tokenizer = AutoTokenizer.from_pretrained(cfg["model_name"])
 
     def tokenize(batch):
@@ -60,14 +67,17 @@ def main():
             max_length=cfg["max_length"]
         )
 
+    # токенизируем датасеты 
     train_ds = train_ds.map(tokenize, batched=True)
     val_ds = val_ds.map(tokenize, batched=True)
 
+    # загружаем предобученную модель 
     model = AutoModelForSequenceClassification.from_pretrained(
         cfg["model_name"],
         num_labels=2
     )
 
+    # устанавливаем параметры fine-tunning из конфига
     training_args = TrainingArguments(
         output_dir=cfg["output_dir"],
         learning_rate=cfg["training"]["learning_rate"],
@@ -86,6 +96,7 @@ def main():
         report_to="none"
     )
 
+    # создаем trainer
     trainer = Trainer(
       model=model,
       args=training_args,
@@ -96,12 +107,15 @@ def main():
       callbacks=[EarlyStoppingCallback(early_stopping_patience=cfg["training"]["early_stopping_patience"])]
     )
 
+    # обучаем 
     trainer.train()
 
+    # получаем метрики 
     metrics = trainer.evaluate()
     print(f"Val F1: {metrics['eval_f1']:.4f}")
     print(f"Val Accuracy: {metrics['eval_accuracy']:.4f}")
 
+    # сохраняем модель 
     trainer.save_model(cfg["output_dir"])
     tokenizer.save_pretrained(cfg["output_dir"])
 
