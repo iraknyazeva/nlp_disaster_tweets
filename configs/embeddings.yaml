@@ -1,0 +1,19 @@
+seed: 42
+
+model_name: 'sentence-transformers/all-MiniLM-L6-v2'
+batch_size: 64
+show_progress_bar: true
+
+use_preprocessed: false
+preprocess_version: "v1"
+
+logreg:
+  class_weight: "balanced"
+  max_iter: 1000
+  param_grid:
+    C: [0.01, 0.1, 1, 10, 100]
+    penalty: ["l1", "l2"]
+    solver: ["liblinear", "saga"]
+
+cv_folds: 5
+scoring: "f1"

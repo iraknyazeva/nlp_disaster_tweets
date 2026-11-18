@@ -218,3 +218,18 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Data, models
+data/
+!data/raw/.gitkeep
+models/
+*.csv
+*.pkl
+*.bin
+*.pt
+*.safetensors
+
+# Catoost
+catboost_info/
+
+*.csv
