@@ -16,27 +16,18 @@ from gensim.models import Word2Vec
 from sklearn.linear_model import LogisticRegression
 from catboost import CatBoostClassifier
 from sklearn.pipeline import Pipeline
-from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score
+from sklearn.model_selection import train_test_split, GridSearchCV, cross_val_score, StratifiedKFold
 from sklearn.metrics import f1_score, accuracy_score
 from sklearn.preprocessing import StandardScaler
 
 from src.utils.seed import set_seed
 from src.preprocessing.clean import apply_preprocessing
+from src.features.w2v_transformer import get_w2v_texts
 
-# получаем эмбеддинги твитов усреднением эмбеддингов токенов, полученных word2vec
-def get_w2v_texts(texts, w2v):
-    embeddings = []
-    for text in texts:
-        tokens = text.split()
-        vectors = [w2v.wv[token] for token in tokens if token in w2v.wv]
-        if len(vectors) > 0:
-            embeddings.append(np.mean(vectors, axis=0))
-        else:
-            embeddings.append(np.zeros(w2v.vector_size))
-    return np.array(embeddings)
+from src.features.w2v_transformer import Word2VecTransformer
 
 # подбор гиперпараметров catboost с помощью optuna 
-def train_catboost_with_optuna(X_train, y_train, cfg):
+def train_catboost_tfidf_with_optuna(X_train, y_train, cfg, vectorizer_params):
     search_space = cfg["catboost"]["search_space"]
     n_trials = cfg["catboost"].get("n_trials", 20)
     early_stopping = cfg["catboost"].get("early_stopping_rounds", 50)
@@ -63,14 +54,31 @@ def train_catboost_with_optuna(X_train, y_train, cfg):
                     log=space.get("log", False)
                 )
 
-        model = CatBoostClassifier(**params)
-        scores = cross_val_score(
-            model, X_train, y_train,
-            cv=cv_folds,
-            scoring="f1",
-            n_jobs=1
-        )
-        return scores.mean()
+        skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=cfg["seed"])
+        scores = []
+
+        for train_idx, val_idx in skf.split(X_train, y_train):
+          X_tr = [X_train[i] for i in train_idx]
+          X_va = [X_train[i] for i in val_idx]
+          y_tr = y_train.iloc[train_idx]
+          y_va = y_train.iloc[val_idx]
+
+          vectorizer = TfidfVectorizer(**vectorizer_params)
+          X_tr = vectorizer.fit_transform(X_tr)
+          X_va = vectorizer.transform(X_va)
+          
+          model = CatBoostClassifier(**params)
+          model.fit(
+            X_tr, y_tr,
+            eval_set=(X_va, y_va),
+            use_best_model=True,
+            verbose=0
+          )
+
+          preds = model.predict(X_va)
+          scores.append(f1_score(y_va, preds))
+
+        return np.mean(scores)
 
     study = optuna.create_study(
         direction="maximize",
@@ -92,11 +100,18 @@ def train_catboost_with_optuna(X_train, y_train, cfg):
     if torch.cuda.is_available():
         best_params["task_type"] = "GPU"
 
+    # после подбора гиперпараметров vectorizer уже на всем train 
+    vectorizer = TfidfVectorizer(**vectorizer_params)
+    X_train = vectorizer.fit_transform(X_train)
+
     best_model = CatBoostClassifier(**best_params)
     best_model.fit(X_train, y_train)
 
     # возвращает обученную модель 
-    return best_model
+    return best_model, vectorizer
+
+
+
 
 @click.command()
 @click.option("--config", default="configs/classic_ml.yaml", help="Path to config")
@@ -160,16 +175,13 @@ def main(config, mode, preprocess, model):
             preds = best_model.predict(X_val)
 
         elif model == "catboost":
-            # tfidf + catboost
-            vectorizer = TfidfVectorizer(
-                ngram_range=tuple(cfg["tfidf"]["ngram_range"]),
-                max_features=cfg["tfidf"]["max_features"],
-                min_df=cfg["tfidf"]["min_df"]
-            )
-            X_train_vec = vectorizer.fit_transform(X_train)
+            vectorizer_params={
+                "ngram_range": tuple(cfg["tfidf"]["ngram_range"]),
+                "max_features": cfg["tfidf"]["max_features"],
+                "min_df": cfg["tfidf"]["min_df"]
+            }
+            best_model, vectorizer = train_catboost_tfidf_with_optuna(X_train, y_train, cfg, vectorizer_params)
             X_val_vec = vectorizer.transform(X_val)
-
-            best_model = train_catboost_with_optuna(X_train_vec, y_train, cfg)
             preds = best_model.predict(X_val_vec)
             joblib.dump(vectorizer, f"models/{model_name}_vectorizer.pkl")
 
@@ -181,60 +193,58 @@ def main(config, mode, preprocess, model):
         joblib.dump(best_model, f"models/{model_name}.pkl")
 
     elif mode == "word2vec":
-        # обучаем word2vec
-        tokenized = [text.split() for text in X_train]
-        w2v = Word2Vec(
-            sentences=tokenized,
-            vector_size=300,
-            window=3,
-            negative=10,
-            min_count=2,
-            seed=cfg["seed"]
-        )
-
-        # получаем эмбеддинги твитов
-        X_train_emb = get_w2v_texts(X_train, w2v)
-        X_val_emb = get_w2v_texts(X_val, w2v)
-
         if model == "logreg":
             # word2vec + logreg
             # для logreg делаем стандартизацию эмбеддингов word2vec 
-            scaler = StandardScaler()
-            X_train_emb = scaler.fit_transform(X_train_emb)
-            X_val_emb = scaler.transform(X_val_emb)
-
-            logreg = LogisticRegression(
+            pipe = Pipeline([
+              ("w2v", Word2VecTransformer(
+                  vector_size=cfg["word2vec"]["vector_size"],
+                  window=cfg["word2vec"]["window"],
+                  negative=cfg["word2vec"]["negative"],
+                  min_count=cfg["word2vec"]["min_count"],
+                  seed=cfg["seed"]
+              )),
+              ("scaler", StandardScaler()),
+              ("clf", LogisticRegression(
                 class_weight=cfg["logreg"]["class_weight"],
                 max_iter=cfg["logreg"]["max_iter"],
                 random_state=cfg["seed"]
-            )
-            param_grid = cfg["logreg"]["param_grid"]
+              ))
+            ])
+
+            param_grid = {
+              f"clf__{k}": v for k, v in cfg["logreg"]["param_grid"].items()
+            }
+
             grid = GridSearchCV(
-                logreg, param_grid,
-                cv=cfg["cv_folds"],
-                scoring=cfg["scoring"],
-                n_jobs=1,
-                verbose=2
+              pipe, 
+              param_grid,
+              cv=cfg["cv_folds"],
+              scoring=cfg["scoring"],
+              n_jobs=1,
+              verbose=2
             )
-            grid.fit(X_train_emb, y_train)
+
+            grid.fit(X_train, y_train)
+
             best_model = grid.best_estimator_
-            print(f"Best params: {grid.best_params_}")
-            print(f"CV F1: {grid.best_score_:.4f}")
-            preds = best_model.predict(X_val_emb)
-            joblib.dump(scaler, f"models/{model_name}_scaler.pkl")
+            print(f"Best params:{grid.best_params_}")
+            print(f"CV f1:{grid.best_score_:.4f}")
+
+            preds = best_model.predict(X_val)
 
         elif model == "catboost":
             # word2vec + catboost 
-            best_model = train_catboost_with_optuna(X_train_emb, y_train, cfg)
-            preds = best_model.predict(X_val_emb)
+            # best_model = train_catboost_with_optuna(X_train_emb, y_train, cfg)
+            # preds = best_model.predict(X_val_emb)
+            print()
 
-        # считаем метрикии сохраняем модель 
+        # считаем метрики и сохраняем модель 
         f1 = f1_score(y_val, preds)
         accuracy = accuracy_score(y_val, preds)
         print(f"Val F1: {f1:.4f}")
         print(f"Val Accuracy: {accuracy:.4f}")
         joblib.dump(best_model, f"models/{model_name}.pkl")
-        joblib.dump(w2v, f"models/{model_name}_w2v.pkl")
 
 if __name__ == "__main__":
     main()

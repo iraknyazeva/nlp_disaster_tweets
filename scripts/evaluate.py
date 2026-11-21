@@ -73,7 +73,10 @@ def eval_word2vec(model_path, texts, y_true, preprocess):
     preds = model.predict(X)
     return f1_score(y_true, preds), accuracy_score(y_true, preds)
 
-def eval_minilm(model_path, texts, y_true, batch_size):
+def eval_minilm(model_path, texts, y_true, batch_size, preprocess=None):
+    if preprocess and preprocess != "raw":
+      texts = apply_preprocessing(texts ,preprocess)
+
     model = joblib.load(model_path)
     embeddings = get_embeddings(
         texts,
@@ -141,7 +144,7 @@ def main():
     for suffix, prep_name in [("raw", "raw"), ("prep_v1", "v1")]:
         path = f"models/minilm_logreg_{suffix}.pkl"
         if Path(path).exists():
-            f1, acc = eval_minilm(path, X_val_text, y_val, batch_size)
+            f1, acc = eval_minilm(path, X_val_text, y_val, batch_size, prep_name)
             results.append({"model": "minilm_logreg", "preprocess": prep_name, "f1": round(f1, 4), "accuracy": round(acc, 4)})
 
     # distilBert
