@@ -110,6 +110,93 @@ def train_catboost_tfidf_with_optuna(X_train, y_train, cfg, vectorizer_params):
     # возвращает обученную модель 
     return best_model, vectorizer
 
+def train_catboost_w2v_with_optuna(X_train, y_train, cfg, w2v_params):
+    search_space = cfg["catboost"]["search_space"]
+    n_trials = cfg["catboost"].get("n_trials", 20)
+    early_stopping = cfg["catboost"].get("early_stopping_rounds", 50)
+    cv_folds = cfg.get("cv_folds", 5)
+
+    def objective(trial):    
+        params = {
+            "random_seed": cfg["seed"],
+            "verbose": 0,
+            "early_stopping_rounds": early_stopping,
+        }
+        # если gpu доступно, обучаем на gpu 
+        if torch.cuda.is_available():
+            params["task_type"] = "GPU"
+
+        for name, space in search_space.items():
+            if space["type"] == "int":
+                params[name] = trial.suggest_int(name, space["low"], space["high"])
+            elif space["type"] == "float":
+                params[name] = trial.suggest_float(
+                    name,
+                    space["low"],
+                    space["high"],
+                    log=space.get("log", False)
+                )
+
+        skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=cfg["seed"])
+        scores = []
+
+        for train_idx, val_idx in skf.split(X_train, y_train):
+          X_tr = [X_train[i] for i in train_idx]
+          X_va = [X_train[i] for i in val_idx]
+          y_tr = y_train.iloc[train_idx]
+          y_va = y_train.iloc[val_idx]
+
+          X_tr_tokenized = [text.split() for text in X_tr]
+
+          w2v = Word2Vec(sentences=X_tr_tokenized, **w2v_params)
+
+          X_tr_emb = get_w2v_texts(X_tr, w2v)
+          X_va_emb = get_w2v_texts(X_va, w2v)
+
+          model = CatBoostClassifier(**params)
+          model.fit(
+            X_tr_emb, y_tr,
+            eval_set=(X_va_emb, y_va),
+            use_best_model=True,
+            verbose=0
+          )
+
+          preds = model.predict(X_va_emb)
+          scores.append(f1_score(y_va, preds))
+
+        return np.mean(scores)
+
+    study = optuna.create_study(
+        direction="maximize",
+        sampler=optuna.samplers.TPESampler(seed=cfg["seed"])
+    )
+    study.optimize(objective, n_trials=n_trials)
+
+    print(f"Best params: {study.best_params}")
+    print(f"CV F1: {study.best_value:.4f}")
+
+    # обучаем финальную модель с лучшими параметрами 
+    best_params = study.best_params.copy()
+    best_params.update({
+        "random_seed": cfg["seed"],
+        "verbose": 100,
+        "early_stopping_rounds": early_stopping,
+    })
+
+    if torch.cuda.is_available():
+        best_params["task_type"] = "GPU"
+
+    X_train_tokenized = [text.split() for text in X_train]
+    # после подбора гиперпараметров w2v уже на всем train
+    w2v = Word2Vec(sentences=X_train_tokenized, **w2v_params)
+    X_train_emb = get_w2v_texts(X_train, w2v)
+
+    best_model = CatBoostClassifier(**best_params)
+    best_model.fit(X_train_emb, y_train)
+
+    # возвращает обученную модель 
+    return best_model, w2v
+    
 
 
 
@@ -237,7 +324,14 @@ def main(config, mode, preprocess, model):
             # word2vec + catboost 
             # best_model = train_catboost_with_optuna(X_train_emb, y_train, cfg)
             # preds = best_model.predict(X_val_emb)
-            print()
+            w2v_params = cfg["word2vec"].copy()
+            w2v_params["seed"] = cfg["seed"]
+
+            best_model, w2v = train_catboost_w2v_with_optuna(X_train, y_train, cfg, w2v_params)
+            X_val_emb = get_w2v_texts(X_val, w2v)
+            preds = best_model.predict(X_val_emb)
+            
+            joblib.dump(w2v, f"models/{model_name}_vectorizer.pkl")
 
         # считаем метрики и сохраняем модель 
         f1 = f1_score(y_val, preds)

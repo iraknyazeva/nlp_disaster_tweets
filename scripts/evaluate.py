@@ -10,7 +10,8 @@ import joblib
 import torch
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import f1_score, accuracy_score
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import AutoTokenizer, AutoModelForSequenceClassification, Trainer, DataCollatorWithPadding
+from datasets import Dataset
 
 from src.utils.seed import set_seed
 from src.preprocessing.clean import apply_preprocessing
@@ -90,12 +91,25 @@ def eval_minilm(model_path, texts, y_true, batch_size, preprocess=None):
 def eval_distilbert(model_path, texts, y_true):
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     model = AutoModelForSequenceClassification.from_pretrained(model_path)
-    model.eval()
 
-    inputs = tokenizer(texts, truncation=True, padding=True, max_length=128, return_tensors="pt")
-    with torch.no_grad():
-        logits = model(**inputs).logits
-    preds = torch.argmax(logits, dim=-1).numpy()
+    def tokenize(batch):
+        return tokenizer(
+            batch["text"],
+            truncation=True,
+            max_length=128
+        )
+
+    dataset = Dataset.from_dict({"text": texts, "label": y_true})
+    dataset = dataset.map(tokenize, batched=True)
+
+    trainer = Trainer(
+        model=model,
+        data_collator=DataCollatorWithPadding(tokenizer),
+    )
+
+    predictions = trainer.predict(dataset).predictions
+    preds = np.argmax(predictions, axis=-1)
+
     return f1_score(y_true, preds), accuracy_score(y_true, preds)
 
 def main():
