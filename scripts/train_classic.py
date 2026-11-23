@@ -57,6 +57,7 @@ def train_catboost_tfidf_with_optuna(X_train, y_train, cfg, vectorizer_params):
         skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=cfg["seed"])
         scores = []
 
+        # кросс-валидация с обучением tf-idf на train части каждого фолда
         for train_idx, val_idx in skf.split(X_train, y_train):
           X_tr = [X_train[i] for i in train_idx]
           X_va = [X_train[i] for i in val_idx]
@@ -140,6 +141,7 @@ def train_catboost_w2v_with_optuna(X_train, y_train, cfg, w2v_params):
         skf = StratifiedKFold(n_splits=cv_folds, shuffle=True, random_state=cfg["seed"])
         scores = []
 
+        # кросс-валидация с обучением word2vec на train части каждого фолда
         for train_idx, val_idx in skf.split(X_train, y_train):
           X_tr = [X_train[i] for i in train_idx]
           X_va = [X_train[i] for i in val_idx]
@@ -187,6 +189,7 @@ def train_catboost_w2v_with_optuna(X_train, y_train, cfg, w2v_params):
         best_params["task_type"] = "GPU"
 
     X_train_tokenized = [text.split() for text in X_train]
+    
     # после подбора гиперпараметров w2v уже на всем train
     w2v = Word2Vec(sentences=X_train_tokenized, **w2v_params)
     X_train_emb = get_w2v_texts(X_train, w2v)
@@ -284,7 +287,7 @@ def main(config, mode, preprocess, model):
             # word2vec + logreg
             # для logreg делаем стандартизацию эмбеддингов word2vec 
             pipe = Pipeline([
-              ("w2v", Word2VecTransformer(
+              ("w2v", Word2VecTransformer( # 
                   vector_size=cfg["word2vec"]["vector_size"],
                   window=cfg["word2vec"]["window"],
                   negative=cfg["word2vec"]["negative"],
@@ -321,9 +324,7 @@ def main(config, mode, preprocess, model):
             preds = best_model.predict(X_val)
 
         elif model == "catboost":
-            # word2vec + catboost 
-            # best_model = train_catboost_with_optuna(X_train_emb, y_train, cfg)
-            # preds = best_model.predict(X_val_emb)
+            # word2vec + catboost
             w2v_params = cfg["word2vec"].copy()
             w2v_params["seed"] = cfg["seed"]
 
