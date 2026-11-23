@@ -61,15 +61,16 @@ def eval_tfidf_catboost(model_path, texts, y_true, preprocess):
 
 def eval_word2vec(model_path, texts, y_true, preprocess):
     model = joblib.load(model_path)
-    w2v = joblib.load(model_path.replace(".pkl", "_w2v.pkl"))
-    
     processed = apply_preprocessing(texts, preprocess)
-    X = get_w2v_embeddings(processed, w2v)
 
-    scaler_path = model_path.replace(".pkl", "_scaler.pkl")
-    if Path(scaler_path).exists():
-        scaler = joblib.load(scaler_path)
-        X = scaler.transform(X)
+    # logreg (тк теперь сохраняется pipeline)
+    if hasattr(model, "named_steps"):
+        preds = model.predict(processed)
+        return f1_score(y_true, preds), accuracy_score(y_true, preds)
+
+    # catboost (сохраняю отдельно модель и w2v)
+    w2v = joblib.load(model_path.replace(".pkl", "_vectorizer.pkl"))
+    X = get_w2v_embeddings(processed, w2v)
 
     preds = model.predict(X)
     return f1_score(y_true, preds), accuracy_score(y_true, preds)
